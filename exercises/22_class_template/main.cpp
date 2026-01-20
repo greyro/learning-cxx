@@ -10,6 +10,10 @@ struct Tensor4D {
     Tensor4D(unsigned int const shape_[4], T const *data_) {
         unsigned int size = 1;
         // TODO: 填入正确的 shape 并计算 size
+        for(int i=0;i<4; ++i){
+            shape[i] = shape_[i];
+            size *=shape[i];
+        }
         data = new T[size];
         std::memcpy(data, data_, size * sizeof(T));
     }
@@ -27,9 +31,53 @@ struct Tensor4D {
     // 例如，`this` 形状为 `[1, 2, 3, 4]`，`others` 形状为 `[1, 2, 1, 4]`，
     // 则 `this` 与 `others` 相加时，3 个形状为 `[1, 2, 1, 4]` 的子张量各自与 `others` 对应项相加。
     Tensor4D &operator+=(Tensor4D const &others) {
-        // TODO: 实现单向广播的加法
-        return *this;
+    // 1) 检查：单向广播（others -> this）
+    for (int d = 0; d < 4; ++d) {
+        if (!(others.shape[d] == 1 || others.shape[d] == shape[d])) {
+            throw std::runtime_error("operator+=: others cannot be broadcast to this shape");
+        }
     }
+
+    // 2) stride_this：this 的连续内存步长（NCHW 风格）
+    unsigned int stride_this[4];
+    stride_this[3] = 1;
+    for (int d = 2; d >= 0; --d) {
+        stride_this[d] = stride_this[d + 1] * shape[d + 1];
+    }
+
+    // 3) stride_other：others 的连续内存步长（一定要用 others.shape）
+    unsigned int stride_other[4];
+    stride_other[3] = 1;
+    for (int d = 2; d >= 0; --d) {
+        stride_other[d] = stride_other[d + 1] * others.shape[d + 1];
+    }
+
+    // 4) 遍历 this 的每个元素 idx，并找到对应的 others 元素 oidx
+    unsigned int total = shape[0] * shape[1] * shape[2] * shape[3];
+
+    for (unsigned int idx = 0; idx < total; ++idx) {
+        // 4.1) idx -> 4D 坐标 coord（在 this 的坐标系里）
+        unsigned int rem = idx;
+        unsigned int coord[4];
+        for (int d = 0; d < 4; ++d) {
+            coord[d] = rem / stride_this[d];
+            rem %= stride_this[d];
+        }
+
+        // 4.2) this 的 coord -> others 的线性索引 oidx（广播维度用 0）
+        unsigned int oidx = 0;
+        for (int d = 0; d < 4; ++d) {
+            unsigned int oc = (others.shape[d] == 1) ? 0 : coord[d];
+            oidx += oc * stride_other[d];
+        }
+
+        // 4.3) 执行 +=
+        data[idx] += others.data[oidx];
+    }
+
+    return *this;
+}
+
 };
 
 // ---- 不要修改以下代码 ----
